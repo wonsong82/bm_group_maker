@@ -89,6 +89,8 @@ class GroupController extends Controller
 
 
         $groups = $finalGroups->map(function($group){
+            $group = $group->sortBy('year');
+
             $group->ageGap  = $group->max('year') - $group->min('year');
             $group->levelA  = $group->where('level', Level::A)->count();
             $group->levelB  = $group->where('level', Level::B)->count();
@@ -97,8 +99,11 @@ class GroupController extends Controller
             $group->levelE  = $group->where('level', Level::E)->count();
             $group->male    = $group->where('gender', Gender::MALE)->count();
             $group->female  = $group->where('gender', Gender::FEMALE)->count();
+
             return $group;
         });
+
+
 
 
         // temporarily save
