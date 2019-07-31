@@ -17,10 +17,11 @@
 
 </head>
 <body>
+@include('header', ['save' => true, 'title' => '그룹 ' . number_format($trial) . '번 결과' ])
 
-<h5>그룹 ({{number_format($trial)}}번 결과)</h5>
 
-<div class="container-fluid">
+<br>
+<main class="container-fluid">
     <div class="row">
 
         @php
@@ -34,7 +35,7 @@
                 <div class="card" style="margin-bottom: 20px;">
                     <div class="card-body">
 
-                        <h5 class="card-title">{{ $i }} 조</h5>
+                        <h5 class="card-title">그룹 {{ $i }}</h5>
 
                         <table class="table table-striped table-bordered table-hover">
                             <thead>
@@ -65,7 +66,7 @@
                             <tr>
                                 <td>나이차: {{ $group->ageGap }}</td>
                                 <td>평군나이: {{ round($group->average('year')) }}</td>
-                                <td>레벨: L {{ $group->levelL }}, A {{ $group->levelA }}, B {{ $group->levelB }}, C {{ $group->levelC }}, D {{ $group->levelD }}</td>
+                                <td>레벨: A {{ $group->levelA }}, B {{ $group->levelB }}, C {{ $group->levelC }}, D {{ $group->levelD }}, E {{ $group->levelE }}</td>
                                 <td>남녀: 남 {{ $group->male }}, 여 {{ $group->female }}</td>
                             </tr>
                         </table>
@@ -77,7 +78,7 @@
         @endforeach
 
     </div>
-</div>
+</main>
 
 </body>
 </html>

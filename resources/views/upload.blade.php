@@ -17,13 +17,11 @@
 
 </head>
 <body>
+    @include('header', ['save' => false, 'title' => '그룹만들기'])
 
-    <div class="container">
+    <main style="padding-top: 80px" class="container-fluid">
         <div class="row">
             <div class="col-md-6 offset-md-3">
-
-                <h3>그룹 만들기</h3>
-
                 <div class="card">
                     <div class="card-body">
 
@@ -42,13 +40,8 @@
                             </div>
 
                             <div class="form-group">
-                                <label for="">그룹 수</label>
-                                <input type="text" class="form-control" name="group" value="10">
-                            </div>
-
-                            <div class="form-group">
-                                <label for="">나이 차이</label>
-                                <input type="text" class="form-control" name="age" value="6">
+                                <label for="">그룹 설정</label>
+                                <textarea name="config" id="config" class="form-control" cols="30" rows="10">@include('default_conf')</textarea>
                             </div>
 
                             <hr>
@@ -66,7 +59,7 @@
 
             </div>
         </div>
-    </div>
+    </>
     <script>
         $(function(){
             $('form').submit(function(){

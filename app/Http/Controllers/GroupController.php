@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Result;
 use Illuminate\Http\Request;
 use Maatwebsite\Excel\Facades\Excel;
 
@@ -10,31 +11,146 @@ class GroupController extends Controller
 
     public function index()
     {
-        return view('upload');
+        $list = $this->getList();
+
+        return view('upload', compact('list'));
     }
 
 
-    protected function makeAgeGroups($users, $count)
+    public function load(Result $result)
     {
-        $totalGroupCount = (int)request()->get('group');
+        $trial  = $result->trial;
+        $groups = unserialize($result->groups);
 
-        $groupCount = floor($totalGroupCount / $count);
-        $groupRemainder = $totalGroupCount % $count;
+        $list = $this->getList();
+        $load = true;
+
+        return view('result', compact('trial', 'groups', 'list', 'load'));
+    }
+
+
+    public function save()
+    {
+        $name = request()->get('name');
+        $temp = Result::where('temp', true)->limit(1)->first();
+
+        $result = Result::create([
+            'name' => $name,
+            'trial' => $temp->trial,
+            'groups' => $temp->groups,
+        ]);
+
+        echo $result->id;
+    }
+
+    public function delete(Result $result)
+    {
+        $result->delete();
+    }
+
+
+
+
+
+    public function makeGroup()
+    {
+        $config = $this->getConfig();
+
+        // get users from excel
+        $file = request()->all()['file'];
+        $excel = Excel::selectSheets('list')->load($file)->get();
+        $users = collect();
+        foreach($excel as $user){
+            $users[] = collect([
+                'name' => trim($user['name']),
+                'gender' => trim(strtolower($user['gender'])) == 'm' ? Gender::MALE : Gender::FEMALE,
+                'dob' => $user['dob']->format('Y/m/d'),
+                'year' => (int)$user['dob']->format('Y'),
+                'phone' => $this->parsePhone($user['phone']),
+                'info' => trim($user['info']),
+                'level' => $this->parseLevel($user['level']),
+                'leader' => trim($user['leader']) == 'Y' ? true : false,
+                'admin' => trim($user['admin']) == 'Y' ? true: false,
+            ]);
+        }
+
+        // filter out assignable users
+        $users = $users->filter(function($user){
+            return !$user['admin'] && !$user['leader'];
+        });
+
+        // make age groups
+        $ageGroups = $this->makeAgeGroups($users, $config);
+
+        // create groups
+        $result      = $this->makeGroups($ageGroups, $config);
+        $finalGroups = $result->finalGroup;
+        $trial       = $result->trial;
+
+
+        $groups = $finalGroups->map(function($group){
+            $group->ageGap  = $group->max('year') - $group->min('year');
+            $group->levelA  = $group->where('level', Level::A)->count();
+            $group->levelB  = $group->where('level', Level::B)->count();
+            $group->levelC  = $group->where('level', Level::C)->count();
+            $group->levelD  = $group->where('level', Level::D)->count();
+            $group->levelE  = $group->where('level', Level::E)->count();
+            $group->male    = $group->where('gender', Gender::MALE)->count();
+            $group->female  = $group->where('gender', Gender::FEMALE)->count();
+            return $group;
+        });
+
+
+        // temporarily save
+        Result::updateOrCreate([
+            'temp' => true
+        ], [
+            'name' => 'Last created group (Temp saved)',
+            'trial' => $trial,
+            'groups' => serialize($groups),
+            'temp' => true
+        ]);
+
+
+        $list = $this->getList();
+
+        return view('result', compact('trial', 'groups', 'list'));
+    }
+
+
+    protected function getList()
+    {
+        $temp = Result::where('temp', true)->limit(1)->get(['id', 'name', 'updated_at', 'temp']);
+        $list = Result::where('temp', false)->orderBy('created_at', 'desc')->get(['id', 'name', 'updated_at', 'temp']);
+
+        return collect()->merge($temp)->merge($list);
+
+    }
+
+    protected function makeAgeGroups($users, $config)
+    {
+        $totalGroupCount    = (int)$config['num_of_groups'];
+        $ageGroupCount      = (int)$config['num_of_age_groups'];
+
+        $groupCount         = floor($totalGroupCount / $ageGroupCount); // how many in 1 group
+        $groupRemainder     = $totalGroupCount % $ageGroupCount;
+
         if($groupRemainder > 0){
-            $remainderStartIndex = floor(($count - $groupRemainder)/2);
-            $remainderEndIndex = $remainderStartIndex + ($groupRemainder-1);
+            $remainderStartIndex    = floor(($ageGroupCount - $groupRemainder) / 2);
+            $remainderEndIndex      = $remainderStartIndex + ($groupRemainder - 1);
         }
         else {
-            $remainderStartIndex = 99999999;
-            $remainderEndIndex = -1;
+            $remainderStartIndex    = 99999999;
+            $remainderEndIndex      = -1;
         }
 
         $users = $users->sortBy('year')->split($totalGroupCount);
 
+
         $ageGroups = collect();
-        for($i=0; $i<$count; $i++){
+        for($i = 0; $i < $ageGroupCount; $i++){
             $ageGroups[] = collect([
-                'groupCount' => $i>=$remainderStartIndex && $i<=$remainderEndIndex ? $groupCount+1 : $groupCount
+                'groupCount' => $i >= $remainderStartIndex && $i <= $remainderEndIndex ? $groupCount + 1 : $groupCount
             ]);
         }
 
@@ -56,47 +172,12 @@ class GroupController extends Controller
         return $ageGroups;
     }
 
-
-    public function makeGroup()
+    protected function makeGroups($ageGroups, $config)
     {
-        $file = request()->all()['file'];
-
-        $excel = Excel::selectSheets('attendence')->load($file)->get();
-
-        $users = collect();
-        foreach($excel as $user){
-            $users[] = collect([
-                'name' => trim($user['name']),
-                'gender' => trim(strtolower($user['gender'])) == 'm' ? Gender::MALE : Gender::FEMALE,
-                'dob' => $user['dob']->format('Y/m/d'),
-                'year' => (int)$user['dob']->format('Y'),
-                'phone' => $this->parsePhone($user['phone']),
-                'info' => trim($user['info']),
-                'level' => $this->parseLevel($user['level']),
-                'fortlee' => trim($user['fortlee']) == 'Y' ? true : false,
-                'admin' => trim($user['admin']) == 'Y' ? true: false,
-            ]);
-        }
-
-        // filter out
-        $fortleeUsers = $users->filter(function($user){
-            return !!$user['fortlee'] && !$user['admin'];
-        });
-
-        $users = $users->filter(function($user){
-            return !$user['admin'] && !$user['fortlee'];
-        });
-
-
-
-        $ageGroups = $this->makeAgeGroups($users, 4);
-
-
-        // Group settings
         $trial = 0;
-        $maxTrial = 100000;
+        $maxTrial = $config['max_trial'];
 
-
+        // make group
         $finalGroups = collect();
 
         foreach($ageGroups as $ageGroup){
@@ -112,34 +193,16 @@ class GroupController extends Controller
                 $shuffledUsers = $ageGroup['users']->shuffle();
                 $groups = $shuffledUsers->split($ageGroup['groupCount']);
             }
-            while(!$this->validateGroups($groups, []));
+            while(!$this->validateGroups($groups, $config));
 
             $finalGroups = $finalGroups->merge($groups);
         }
 
-
-        $finalGroups[] = $fortleeUsers;
-
-
-        $groups = $finalGroups->map(function($group){
-            $group->ageGap = $group->max('year') - $group->min('year');
-            $group->levelL = $group->where('level', Level::L)->count();
-            $group->levelA = $group->where('level', Level::A)->count();
-            $group->levelB = $group->where('level', Level::B)->count();
-            $group->levelC = $group->where('level', Level::C)->count();
-            $group->levelD = $group->where('level', Level::D)->count();
-            $group->male = $group->where('gender', Gender::MALE)->count();
-            $group->female = $group->where('gender', Gender::FEMALE)->count();
-            return $group;
-        });
-
-
-
-
-        return view('result', compact('trial', 'groups'));
+        return (object)['finalGroup' => $finalGroups, 'trial' => $trial];
     }
 
-    protected function validateGroups($groups, $options)
+
+    protected function validateGroups($groups, $config)
     {
         $level = null;
         $gender = null;
@@ -147,36 +210,42 @@ class GroupController extends Controller
         foreach($groups as $group){
             if(!$gender){
                 $gender = [
-                    Gender::MALE => $group->where('gender', Gender::MALE)->count(),
-                    Gender::FEMALE => $group->where('gender', Gender::FEMALE)->count(),
+                    Gender::MALE    => $group->where('gender', Gender::MALE)->count(),
+                    Gender::FEMALE  => $group->where('gender', Gender::FEMALE)->count(),
                 ];
             }
             else {
-                if(abs($group->where('gender', Gender::MALE)->count() - $gender[Gender::MALE]) > 1)
+                if(abs($group->where('gender', Gender::MALE)->count() - $gender[Gender::MALE]) > $config['gender_diff'])
                     return false;
-                if(abs($group->where('gender', Gender::FEMALE)->count() - $gender[Gender::FEMALE]) > 1)
+                if(abs($group->where('gender', Gender::FEMALE)->count() - $gender[Gender::FEMALE]) > $config['gender_diff'])
                     return false;
             }
 
             if(!$level){
                 $level = [
-                    Level::L => $group->where('level', Level::L)->count(),
                     Level::A => $group->where('level', Level::A)->count(),
                     Level::B => $group->where('level', Level::B)->count(),
                     Level::C => $group->where('level', Level::C)->count(),
                     Level::D => $group->where('level', Level::D)->count(),
+                    Level::E => $group->where('level', Level::E)->count(),
                 ];
             }
             else {
-                if(abs($group->where('level', Level::L)->count() - $level[Level::L]) > 1)
+
+                if(!is_null($config['a_level_diff']) &&
+                    abs($group->where('level', Level::A)->count() - $level[Level::A]) > $config['a_level_diff'])
                     return false;
-                if(abs($group->where('level', Level::A)->count() - $level[Level::A]) > 1)
+                if(!is_null($config['b_level_diff']) &&
+                    abs($group->where('level', Level::B)->count() - $level[Level::B]) > $config['b_level_diff'])
                     return false;
-                if(abs($group->where('level', Level::B)->count() - $level[Level::B]) > 1)
+                if(!is_null($config['c_level_diff']) &&
+                    abs($group->where('level', Level::C)->count() - $level[Level::C]) > $config['c_level_diff'])
                     return false;
-                if(abs($group->where('level', Level::C)->count() - $level[Level::C]) > 1)
+                if(!is_null($config['d_level_diff']) &&
+                    abs($group->where('level', Level::D)->count() - $level[Level::D]) > $config['d_level_diff'])
                     return false;
-                if(abs($group->where('level', Level::D)->count() - $level[Level::D]) > 1)
+                if(!is_null($config['e_level_diff']) &&
+                    abs($group->where('level', Level::E)->count() - $level[Level::E]) > $config['e_level_diff'])
                     return false;
             }
         }
@@ -196,11 +265,10 @@ class GroupController extends Controller
         return sprintf('(%s%s%s) %s%s%s-%s%s%s%s', $d[0], $d[1], $d[2], $d[3], $d[4], $d[5], $d[6], $d[7], $d[8], $d[9]);
     }
 
+
     protected function parseLevel($string)
     {
         switch(strtoupper(trim($string))){
-            case 'L':
-                return Level::L;
             case 'A':
                 return Level::A;
             case 'B':
@@ -209,7 +277,26 @@ class GroupController extends Controller
                 return Level::C;
             case 'D':
                 return Level::D;
+            case 'E':
+                return Level::E;
         }
+    }
+
+    protected function getConfig()
+    {
+        $str = request()->get('config');
+        $configs = collect();
+        foreach(explode("\n", $str) as $line){
+            $config = explode('=', $line);
+            $key = isset($config[0])? trim($config[0]): null;
+            $value = isset($config[1])? (trim($config[1])!=''? trim($config[1]): null) : null;
+
+            if($key){
+                $configs[$key] = is_numeric($value)? (int)$value : $value;
+            }
+        };
+
+        return $configs;
     }
 
 }
@@ -220,9 +307,10 @@ class Gender {
 }
 
 class Level {
-    const L     = 'L';
     const A     = 'A';
     const B     = 'B';
     const C     = 'C';
     const D     = 'D';
+    const E     = 'E';
 }
+
